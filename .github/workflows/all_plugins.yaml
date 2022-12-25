@@ -1,0 +1,135 @@
+name: all_plugins
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'website/**'
+      - '**.md'
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'docs/**'
+      - 'website/**'
+      - '**.md'
+
+jobs:
+  analyze:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - uses: bluefireteam/melos-action@v2
+      - name: 'Run Analyze'
+        run: melos run analyze
+      - name: 'Pub Check'
+        run: |
+          melos exec -c 1 --no-private --ignore="*example*" -- \
+            dart pub publish --dry-run
+
+  pub_get_check:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - uses: bluefireteam/melos-action@v2
+      - name: 'Flutter Pub Get'
+        run: |
+          melos exec -c 1 --scope="*example*" -- \
+            "flutter pub get"
+
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - uses: bluefireteam/melos-action@v2
+      - uses: Homebrew/actions/setup-homebrew@master
+      - name: 'Install Tools'
+        run: |
+          flutter pub global activate flutter_plugin_tools
+          brew install swiftformat
+          brew install clang-format
+          brew link --overwrite --force clang-format
+      - name: 'Formatter version'
+        run: |
+          clang-format --version
+          swiftformat --version
+      - name: 'Dart, Java and Objective-C '
+        run: |
+          flutter pub global run flutter_plugin_tools format
+          ./.github/workflows/scripts/validate-formatting.sh
+      - name: 'Swift'
+        if: ${{ success() || failure() }}
+        run: |
+          swiftformat .
+          ./.github/workflows/scripts/validate-formatting.sh
+
+  build_examples_dart:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - uses: bluefireteam/melos-action@v2
+      - name: 'Build Examples'
+        run: |
+          melos exec -c 1 --scope="*example*" --dir-exists="web" -- \
+            "flutter build web --no-pub"
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - uses: bluefireteam/melos-action@v2
+      - name: 'Flutter Test'
+        run: melos run test --no-select
+      - name: 'Flutter Test - Web'
+        run: melos run test:web --no-select
+
+  check-files-license-headers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '^1.13.1'
+      # Go is used by addlicense command (addlicense is used in melos run
+      # check-license-header)
+      - run: go install github.com/google/addlicense@latest
+      - name: Install Dart
+        uses: dart-lang/setup-dart@v1.3
+      - name: Install Melos
+        uses: bluefireteam/melos-action@v2
+        with:
+          # Running `melos bootstrap` is not needed because we use Melos just
+          # for the `check-license-header` script.
+          run-bootstrap: false
+      - name: Check license header
+        run: melos run check-license-header 
